@@ -1,0 +1,286 @@
+---
+version: "3.7"
+services:
+# Nautobot used as the primary SSoT for Network Data
+  nautobot:
+    image: "networktocode/nautobot:2.2.0-py3.9"
+    env_file:
+      - "./nautobot/local.env"
+    ports:
+      - "8443:8443"
+      - "8080:8080"
+    restart: "unless-stopped"
+    healthcheck:
+      interval: "360s"
+      timeout: "5s"
+      start_period: "5s"
+      retries: 3
+      test: ["CMD", "nautobot-server", "health_check"]
+# Nautobot Worker and Beat for Nautobot Jobs
+  celery_worker:
+    image: "networktocode/nautobot:2.2.0-py3.9"
+    entrypoint: "sh -c 'nautobot-server celery worker -l $$NAUTOBOT_LOG_LEVEL'"
+    healthcheck:
+      interval: "360s"
+      timeout: "5s"
+      start_period: "5s"
+      retries: 3
+      test: ["CMD", "nautobot-server", "health_check"]
+    depends_on:
+      - "nautobot"
+      - "redis"
+    env_file:
+      - "./nautobot/local.env"
+    tty: true
+  celery_beat:
+    image: "networktocode/nautobot:2.2.0-py3.9"
+    entrypoint: "sh -c 'nautobot-server celery beat -l $$NAUTOBOT_LOG_LEVEL'"
+    healthcheck:
+      interval: "360s"
+      timeout: "5s"
+      start_period: "5s"
+      retries: 3
+      test: ["CMD", "nautobot-server", "health_check"]
+    depends_on:
+      - "nautobot"
+      - "redis"
+    env_file:
+      - "./nautobot/local.env"
+    tty: true
+# Redis and Postgres for Nautobot
+  redis:
+    image: "redis:alpine"
+    env_file:
+      - "./nautobot/local.env"
+    command:
+      - "sh"
+      - "-c"  # this is to evaluate the $REDIS_PASSWORD from the env
+      - "redis-server --appendonly yes --requirepass $$NAUTOBOT_REDIS_PASSWORD"  ## $$ because of docker-compose
+    restart: "unless-stopped"
+  nautobot_postgres:
+    image: "postgres:13"
+    # Apple Silicon has issues with Postgres14, there is no needed functions to get to Postgres14 for Nautobot to work.
+    env_file:
+      - "./nautobot/local.env"
+    environment:
+      NAUTOBOT_DB_ENGINE: "django.db.backends.postgres"
+    volumes:
+      - "./nautobot/db_data:/var/lib/postgresql/data"
+    restart: "unless-stopped"
+
+# Prometheus, Grafana, AlertManager, and Telegraf for Monitoring
+  Prometheus:
+    image: prom/prometheus
+    ports:
+      - 9090:9090
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    environment:
+      - PROMETHEUS_CONFIG_FILE=/etc/prometheus/prometheus.yml
+
+  Grafana:
+    image: grafana/grafana
+    ports:
+      - 3000:3000
+    volumes:
+      - ./grafana/grafana.ini:/etc/grafana/grafana.ini
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=devpasswd
+    networks:
+      - nre_project
+
+  AlertManager:
+    image: prom/alertmanager
+    ports:
+      - 9093:9093
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+    networks:
+      - nre_project
+      
+  telegraf:
+    image: telegraf
+    volumes:
+      - ./telegraf/telegraf.conf:/etc/telegraf/telegraf.conf
+    environment:
+      - HOST_PROC=/host/proc
+      - HOST_SYS=/host/sys
+      - HOST_ETC=/host/etc
+    networks:
+      - nre_project
+
+# Elastic / Logstash / Kibana for Indexing data and logs
+  elastic:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.0
+    environment:
+      node.name: elastic
+      discovery.type: single-node
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+      bootstrap.memory_lock: "true"
+    ports:
+      - 9200:9200
+      - 9300:9300
+    volumes:
+      - "./elk/elastic/:/usr/share/elasticsearch/data"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    healthcheck:
+      test: ["CMD-SHELL", "curl http://localhost:9200"]
+      interval: 10s
+      timeout: 10s
+      retries: 120
+    networks:
+      - nre_project
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:7.17.0
+    volumes:
+      - ./elk/logstash/pipeline/:/usr/share/logstash/pipeline/
+    ports:
+      - 5000:5000
+      - 514:514
+      - 162:162
+    environment:
+      - 'ELASTICSEARCH_HOSTS=["http://elastic:9200"]'
+      - 'xpack.monitoring.elasticsearch.hosts=["http://elastic:9200"]'
+      - 'xpack.monitoring.enabled=true'
+      - 'xpack.monitoring.collection.enabled=true'
+      - 'xpack.monitoring.collection.interval=10s'
+    depends_on:
+      elastic:
+        condition: service_healthy
+    networks:
+      nre_project:
+        ipv4_address: 192.168.0.254
+
+# GLPI for ITSM
+  mariadb:
+    image: mariadb:10.7
+    container_name: mariadb
+    hostname: mariadb
+    volumes:
+      - ./glpi/mariadb/mysql:/var/lib/mysql
+    env_file:
+      - ./glpi/mariadb/mariadb.env
+    restart: always
+    networks:
+      - nre_project
+
+  glpi:
+    image: diouxx/glpi
+    container_name : glpi
+    hostname: glpi
+    ports:
+      - "80:8000"
+    volumes:
+      - ./glpi/glpi/html/:/var/www/html/glpi
+    environment:
+      - TIMEZONE=America/Chicago
+    restart: always
+    networks:
+      - nre_project
+  # Ansible AWX For Network Automation
+  awx_postgres:
+    image: "postgres:12"
+    environment:
+      POSTGRES_USER: devuser
+      POSTGRES_PASSWORD: devpasswd
+      POSTGRES_DB: awx
+    volumes:
+      - "./awx/postgres_data:/var/lib/postgresql/data"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U awx"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nre_project
+
+  rabbitmq:
+    image: "rabbitmq:3"
+    environment:
+      RABBITMQ_DEFAULT_VHOST: awx
+      RABBITMQ_DEFAULT_USER: devuser
+      RABBITMQ_DEFAULT_PASS: devpasswd
+    networks:
+      - nre_project
+
+  memcached:
+    image: "memcached:alpine"
+    networks:
+      - nre_project
+
+  awx_web:
+    # image: "geerlingguy/awx_web:latest"
+    image: "ansible/awx_web:11.1.0"
+    links:
+      - rabbitmq
+      - memcached
+      - awx_postgres
+    ports:
+      - "8090:8052"
+    hostname: awxweb
+    user: root
+    environment:
+      SECRET_KEY: devpasswd
+      DATABASE_USER: devuser
+      DATABASE_PASSWORD: devpasswd
+      DATABASE_NAME: awx
+      DATABASE_PORT: 5432
+      DATABASE_HOST: awx_postgres
+      RABBITMQ_USER: devuser
+      RABBITMQ_PASSWORD: devpasswd
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_VHOST: awx
+      MEMCACHED_HOST: memcached
+      MEMCACHED_PORT: 11211
+    depends_on:
+      - "awx_postgres"
+      - "rabbitmq"
+      - "memcached"
+    networks:
+      - nre_project
+
+  awx_task:
+    # image: "geerlingguy/awx_task:latest"
+    image: "ansible/awx_task:11.1.0"
+    links:
+      - rabbitmq
+      - memcached
+      - awx_web:awxweb
+      - awx_postgres
+    hostname: awx
+    user: root
+    environment:
+      SECRET_KEY: devpasswd
+      DATABASE_USER: devuser
+      DATABASE_PASSWORD: devpasswd
+      DATABASE_NAME: awx
+      DATABASE_PORT: 5432
+      DATABASE_HOST: awx_postgres
+      RABBITMQ_USER: devuser
+      RABBITMQ_PASSWORD: devpasswd
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_VHOST: awx
+      MEMCACHED_HOST: memcached
+      MEMCACHED_PORT: 11211
+    depends_on:
+      - "awx_postgres"
+      - "rabbitmq"
+      - "memcached"
+    networks:
+      - nre_project
+
+networks:
+  nre_project:
+    name: nre_project
+    ipam:
+      config:
+        - subnet: 192.168.0.0/24
+          gateway: 192.168.0.1

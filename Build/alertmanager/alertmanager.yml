@@ -1,0 +1,13 @@
+global:
+  resolve_timeout: 5m
+route:
+  receiver: slack_receiver
+receivers:
+    - name: slack_receiver
+      slack_configs:
+        - send_resolved: true
+          channel: '#the-nre-channel'
+          title: '{{ template "slack.title" . }}'
+          text: '{{ template "slack.text" . }}'
+          api_url: 'https://hooks.slack.com/services/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'
+

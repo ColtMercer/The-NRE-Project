@@ -1,0 +1,8 @@
+# Production dependencies
+nornir
+nornir-netmiko
+nornir-napalm
+nornir-utils
+nornir-scrapli
+fastapi
+uvicorn

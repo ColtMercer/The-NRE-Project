@@ -1,0 +1,20 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 10s
+rule_files:
+  - rules.yml
+alerting:
+  alertmanagers:
+  - static_configs:
+    - targets:
+       - alertmanager:9093
+scrape_configs:
+ - job_name: prometheus
+   static_configs:
+       - targets: ["localhost:9090"]
+#  - job_name: nautobot
+#    nautobot_sd_configs:
+#      - api_url: "http://nautobot:8080/api/v1/"
+#        api_token: "your-api-token"
+#        target_label: "instance"
+#        target_label_source: "hostname"

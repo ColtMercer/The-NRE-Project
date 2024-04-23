@@ -1,0 +1,8 @@
+# Production Environment Dependencies
+-r requirements.txt
+
+# Development Environment Dependencies
+pytest
+coverage
+sphinx
+pylint
