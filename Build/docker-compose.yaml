@@ -65,7 +65,7 @@ services:
     environment:
       NAUTOBOT_DB_ENGINE: "django.db.backends.postgres"
     volumes:
-      - "./nautobot/db_data:/var/lib/postgresql/data"
+      - "./volumes/nautobot/db_data:/var/lib/postgresql/data"
     restart: "unless-stopped"
 
 # Prometheus, Grafana, AlertManager, and Telegraf for Monitoring
@@ -77,6 +77,8 @@ services:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
     environment:
       - PROMETHEUS_CONFIG_FILE=/etc/prometheus/prometheus.yml
+    networks:
+      - nre_project
 
   Grafana:
     image: grafana/grafana
@@ -123,7 +125,7 @@ services:
       - 9200:9200
       - 9300:9300
     volumes:
-      - "./elk/elastic/:/usr/share/elasticsearch/data"
+      - "./volumes/elk/elastic/:/usr/share/elasticsearch/data"
     ulimits:
       memlock:
         soft: -1
@@ -163,7 +165,7 @@ services:
     container_name: mariadb
     hostname: mariadb
     volumes:
-      - ./glpi/mariadb/mysql:/var/lib/mysql
+      - ./volumes/glpi/mariadb/mysql:/var/lib/mysql
     env_file:
       - ./glpi/mariadb/mariadb.env
     restart: always
@@ -177,12 +179,13 @@ services:
     ports:
       - "80:8000"
     volumes:
-      - ./glpi/glpi/html/:/var/www/html/glpi
+      - ./volumes/glpi/glpi/html/:/var/www/html/glpi
     environment:
       - TIMEZONE=America/Chicago
     restart: always
     networks:
       - nre_project
+
   # Ansible AWX For Network Automation
   awx_postgres:
     image: "postgres:12"
@@ -191,7 +194,7 @@ services:
       POSTGRES_PASSWORD: devpasswd
       POSTGRES_DB: awx
     volumes:
-      - "./awx/postgres_data:/var/lib/postgresql/data"
+      - "./volumes/awx/postgres:/var/lib/postgresql/data"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U awx"]
       interval: 10s

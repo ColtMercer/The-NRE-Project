@@ -1,0 +1,21 @@
+name: clos_fabric
+prefix: rusdlab-
+
+topology:
+  kinds:
+    ceos:
+      image: ceos
+  nodes:
+    lea1000-ceos:
+      kind: ceos
+    lea1001-ceos:
+      kind: ceos
+  
+  links:
+    - endpoints: ["lea1000-ceos:Ethernet1", "lea1001-ceos:Ethernet1"]
+    - endpoints: ["lea1000-ceos:Ethernet2", "lea1001-ceos:Ethernet2"]
+    - type: mgmt-net
+      endpoint:
+        node: lea1000-ceos
+        interface: Management1
+      host-interface: eth0
